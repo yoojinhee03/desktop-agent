@@ -1,0 +1,860 @@
+# 정책 엔진 규칙집 (macOS). 출처: 노션 "설계: 정책 엔진" > 명령 규칙·경로 규칙 (2026-11-10 확정본)
+# - 단위 명령마다 명령 → 경로 → 네트워크 규칙 순으로 등급을 매기고 최댓값을 따른다.
+# - 같은 명령에 여러 규칙이 맞으면 그중 최댓값 (예: find 0 + find -delete 1 → 1).
+# - 등급: 0 읽기 · 1 되돌릴 수 있는 쓰기 · 2 시스템 변경·설치·외부 통신 · 3 파괴적·권한 상승·업로드 · block 차단
+# - 규칙을 바꾸면 tests/cases 에 테스트를 추가·수정한다. 차단을 느슨하게 하는 변경은 결정 로그에 남긴다.
+version: 1
+
+defaults:
+  max_shell_depth: 3 # bash -c 안쪽 문자열 재파싱 최대 단계
+  bulk_delete: { file_count_gt: 50, total_bytes_gt: 1073741824 } # 50개 또는 1GB 초과면 2등급
+  trash_command: /usr/bin/trash # macOS 15 이상 기본 제공
+
+# ───────────────────────── 경로 규칙 ─────────────────────────
+# 읽기 / 쓰기·삭제 등급. 여러 종류에 걸치면 최댓값. 심볼릭 링크는 실제 경로로도 판정한다.
+path_classes:
+  - id: path.home
+    globs: ["~/**"]
+    read: 0
+    write: 1
+    reason: 일반 홈 경로
+  - id: path.temp
+    globs: ["/tmp/**", "/private/tmp/**", "/var/folders/**", "/private/var/folders/**"]
+    read: 0
+    write: 1
+    reason: 임시 폴더
+  - id: path.outside_home
+    globs: ["/**"]
+    except:
+      [
+        "~/**",
+        "/tmp/**",
+        "/private/tmp/**",
+        "/var/folders/**",
+        "/private/var/folders/**",
+        "/dev/**",
+      ]
+    read: 0
+    write: 2
+    reason: 홈 밖 경로 (1등급 쓰기는 홈 안만)
+  - id: path.dev_stream
+    globs: ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd/**"]
+    read: 0
+    write: 0
+    reason: 표준 입출력 장치
+  - id: path.device
+    globs: ["/dev/**"]
+    except: ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd/**"]
+    read: 3
+    write: block
+    reason: 디스크 등 장치 파일
+  - id: path.root_or_home
+    globs: ["/", "~", "/Users", "/Volumes/*"]
+    read: 0
+    write: block
+    guard_ancestors: true
+    reason: 루트 또는 홈 전체
+  - id: path.shell_config
+    globs:
+      - "~/.zshrc"
+      - "~/.zprofile"
+      - "~/.zshenv"
+      - "~/.zlogin"
+      - "~/.bashrc"
+      - "~/.bash_profile"
+      - "~/.profile"
+      - "~/.gitconfig"
+      - "~/.config/git/**"
+      - "~/Library/Preferences/**"
+      - "~/Library/LaunchAgents/**"
+    read: 0
+    write: 2
+    reason: 셸·앱 설정
+  - id: path.git_hooks
+    globs: ["**/.git/hooks/**", "**/.husky/**"]
+    read: 0
+    write: 2
+    reason: git 훅 (git 명령 때 자동 실행되는 코드)
+  - id: path.shell_history
+    globs: ["~/.zsh_history", "~/.bash_history", "~/.zsh_sessions/**", "~/.bash_sessions/**"]
+    read: 0
+    write: block
+    reason: 셸 기록 (흔적 삭제 방지)
+  - id: path.credentials
+    globs:
+      - "~/.ssh/**"
+      - "~/.aws/**"
+      - "~/.config/gcloud/**"
+      - "~/.kube/**"
+      - "~/.docker/config.json"
+      - "~/.npmrc"
+      - "~/.netrc"
+      - "**/.env"
+      - "**/.env.*"
+      - "**/.envrc"
+    read: 0
+    write: 3
+    upload: block
+    local_only: true
+    credential: true
+    guard_ancestors: true
+    reason: 자격증명 (원문은 로컬 처리만)
+  - id: path.private_key
+    globs: ["~/.ssh/id_*", "~/Library/Keychains/**"]
+    except: ["~/.ssh/*.pub"]
+    read: block
+    write: block
+    upload: block
+    credential: true
+    guard_ancestors: true
+    reason: 개인키·키체인
+  - id: path.browser_secrets
+    globs:
+      - "~/Library/Application Support/Google/Chrome/**/Cookies"
+      - "~/Library/Application Support/Google/Chrome/**/Cookies-journal"
+      - "~/Library/Application Support/Google/Chrome/**/Login Data"
+      - "~/Library/Application Support/Google/Chrome/**/Login Data-journal"
+      - "~/Library/Application Support/Microsoft Edge/**/Cookies"
+      - "~/Library/Application Support/Microsoft Edge/**/Login Data"
+      - "~/Library/Application Support/Arc/User Data/**/Cookies"
+      - "~/Library/Application Support/Arc/User Data/**/Login Data"
+      - "~/Library/Application Support/BraveSoftware/**/Cookies"
+      - "~/Library/Application Support/BraveSoftware/**/Login Data"
+      - "~/Library/Application Support/Firefox/Profiles/**/cookies.sqlite"
+      - "~/Library/Application Support/Firefox/Profiles/**/logins.json"
+      - "~/Library/Application Support/Firefox/Profiles/**/key4.db"
+      - "~/Library/Cookies/**"
+    read: block
+    write: block
+    upload: block
+    credential: true
+    guard_ancestors: true
+    reason: 브라우저 쿠키·저장된 비밀번호
+  - id: path.browser_profile
+    globs:
+      - "~/Library/Application Support/Google/Chrome/**"
+      - "~/Library/Application Support/Microsoft Edge/**"
+      - "~/Library/Application Support/Arc/**"
+      - "~/Library/Application Support/BraveSoftware/**"
+      - "~/Library/Application Support/Firefox/Profiles/**"
+      - "~/Library/Safari/**"
+    read: 0
+    write: 3
+    upload: block
+    local_only: true
+    credential: true
+    reason: 브라우저 프로필 (원문은 로컬 처리만)
+  - id: path.system
+    globs:
+      - "/etc/**"
+      - "/private/etc/**"
+      - "/Library/**"
+      - "/usr/**"
+      - "/Applications/**"
+      - "/private/var/db/**"
+    except: ["/usr/local/**"]
+    read: 0
+    write: 3
+    guard_ancestors: true
+    reason: 시스템 경로
+  - id: path.os_protected
+    globs: ["/System/**", "/bin/**", "/sbin/**"]
+    read: 0
+    write: block
+    guard_ancestors: true
+    reason: OS 보호 영역
+  - id: path.agent_internal
+    # 실행 시 DecideContext.agentPaths 가 여기에 더해진다
+    globs: ["~/Library/Application Support/desktop-agent/**", "~/.desktop-agent/**"]
+    read: 0
+    write: block
+    guard_ancestors: true
+    reason: 에이전트 내부 (정책·감사 로그·체크포인트)
+
+# ───────────────────────── 명령 규칙 ─────────────────────────
+commands:
+  # ── 0등급: 읽기 ──
+  - id: cmd.read.files
+    match:
+      {
+        command:
+          [
+            cat,
+            head,
+            tail,
+            less,
+            more,
+            wc,
+            grep,
+            egrep,
+            fgrep,
+            sort,
+            uniq,
+            cut,
+            diff,
+            cmp,
+            md5,
+            shasum,
+            sha256sum,
+            strings,
+            od,
+            hexdump,
+            xxd,
+            base64,
+            jq,
+            nl,
+            tr,
+            column,
+            fold,
+            sed,
+            awk,
+            comm,
+            paste,
+            iconv,
+            plutil,
+          ],
+      }
+    grade: 0
+    reason: 파일 읽기·텍스트 처리
+    paths: { op: read, recursive: flag }
+  - id: cmd.read.rg
+    match: { command: [rg, ag] }
+    grade: 0
+    reason: 파일 내용 검색
+    paths: { op: read, recursive: always }
+  - id: cmd.read.meta
+    match:
+      {
+        command:
+          [
+            ls,
+            stat,
+            file,
+            mdls,
+            du,
+            df,
+            tree,
+            realpath,
+            readlink,
+            basename,
+            dirname,
+            find,
+            test,
+            "[",
+          ],
+      }
+    grade: 0
+    reason: 파일 정보 조회
+    paths: { op: meta }
+  - id: cmd.read.spotlight
+    match: { command: mdfind }
+    grade: 0
+    reason: Spotlight 검색
+  - id: cmd.read.env
+    match:
+      {
+        command:
+          [
+            pwd,
+            which,
+            whoami,
+            uname,
+            sw_vers,
+            echo,
+            printf,
+            printenv,
+            ps,
+            date,
+            id,
+            hostname,
+            "true",
+            "false",
+            type,
+            uptime,
+            sleep,
+            seq,
+            clear,
+            tput,
+            cal,
+            ":",
+          ],
+      }
+    grade: 0
+    reason: 환경 확인
+  - id: cmd.read.env_noargs
+    match: { command: env, no_args: true }
+    grade: 0
+    reason: 환경 변수 보기
+  - id: cmd.read.top
+    match: { command: top, args_any: ["-l"] }
+    grade: 0
+    reason: 프로세스 1회 조회
+  - id: cmd.read.lsof
+    match: { command: lsof, flags_any: ["-i"] }
+    grade: 0
+    reason: 네트워크 연결 조회
+  - id: cmd.read.history
+    match: { command: history }
+    grade: 0
+    reason: 셸 기록 보기
+  - id: cmd.read.cd
+    match: { command: [cd, pushd, popd] }
+    grade: 0
+    reason: 작업 폴더 이동
+    handler: cd
+  - id: cmd.read.git
+    match:
+      {
+        command: git,
+        subcommand: [status, log, diff, show, branch, rev-parse, ls-files, blame, describe],
+      }
+    grade: 0
+    reason: git 조회
+  - id: cmd.read.brew
+    match: { command: brew, subcommand: [list, info, search] }
+    grade: 0
+    reason: Homebrew 조회
+  - id: cmd.read.npm
+    match: { command: npm, subcommand: [ls, list] }
+    grade: 0
+    reason: npm 패키지 조회
+  - id: cmd.read.pip
+    match: { command: [pip, pip3], subcommand: [list, show, freeze] }
+    grade: 0
+    reason: pip 패키지 조회
+  - id: cmd.read.defaults
+    match: { command: defaults, subcommand: [read, read-type, domains, find] }
+    grade: 0
+    reason: 설정값 조회
+  - id: cmd.read.version
+    match:
+      command:
+        [
+          node,
+          npm,
+          pnpm,
+          yarn,
+          python,
+          python3,
+          pip,
+          pip3,
+          git,
+          brew,
+          ruby,
+          go,
+          cargo,
+          rustc,
+          java,
+          docker,
+          tsc,
+          deno,
+          bun,
+          swift,
+          perl,
+          php,
+        ]
+      sole_arg_any: ["--version", "-v", "-V", "version"]
+    grade: 0
+    reason: 버전 확인
+  - id: cmd.open.reveal
+    match: { command: open, args_any: ["-R"] }
+    grade: 0
+    reason: Finder에서 위치 보기
+    paths: { op: meta }
+  - id: cmd.open
+    match: { command: open }
+    grade: 0
+    reason: 문서·폴더 열기 (실행 파일·.app·.command·.pkg는 2등급)
+    handler: open
+  - id: cmd.open.app
+    match: { command: open, flags_any: ["-a", "-b"] }
+    grade: 1
+    reason: 설치된 앱 실행
+
+  # ── 1등급: 되돌릴 수 있는 쓰기 (홈 안, 민감 경로 제외) ──
+  - id: cmd.write.create
+    match: { command: [mkdir, touch] }
+    grade: 1
+    reason: 폴더·파일 만들기
+    paths: { op: write }
+  - id: cmd.write.copy
+    match: { command: [cp, ditto] }
+    grade: 1
+    reason: 복사
+    paths: [{ op: read, args: all_but_last, recursive: flag }, { op: write, args: last }]
+  - id: cmd.write.move
+    match: { command: mv }
+    grade: 1
+    reason: 이동·이름 바꾸기
+    paths: [{ op: delete, args: all_but_last }, { op: write, args: last }]
+  - id: cmd.write.link
+    match: { command: ln }
+    grade: 1
+    reason: 링크 만들기 (원본은 읽기로 판정)
+    paths: [{ op: read, args: all_but_last }, { op: write, args: last }]
+  - id: cmd.write.tee
+    match: { command: tee }
+    grade: 1
+    reason: 파일에 쓰기
+    paths: { op: write }
+  - id: cmd.write.sed_inplace
+    match: { command: [sed, perl], flags_any: ["-i"] }
+    grade: 1
+    reason: 파일 직접 수정
+    paths: { op: write }
+  - id: cmd.write.archive
+    match: { command: [tar, zip, gzip, gunzip, unzip, bzip2, xz] }
+    grade: 1
+    reason: 압축·해제 (대상은 재귀 읽기로 판정)
+    paths: { op: read, recursive: always }
+  - id: cmd.trash
+    match: { command: trash }
+    grade: 1
+    reason: 휴지통 이동
+    paths: { op: delete }
+  - id: cmd.rm
+    match: { command: [rm, unlink] }
+    grade: 1
+    reason: 삭제 → 휴지통 이동으로 치환
+    handler: rm
+  - id: cmd.rmdir
+    match: { command: rmdir }
+    grade: 1
+    reason: 빈 폴더 삭제
+    paths: { op: delete }
+  - id: cmd.dd
+    match: { command: dd }
+    grade: 1
+    reason: 블록 복사 (if=·of= 경로로 판정)
+    handler: dd
+  - id: cmd.git.local_write
+    match: { command: git, subcommand: [add, commit, stash] }
+    grade: 1
+    reason: git 로컬 기록
+  - id: cmd.git.switch_create
+    match: { command: git, subcommand: [switch, checkout], flags_any: ["-c", "-C", "-b", "-B"] }
+    grade: 1
+    reason: 새 브랜치 만들기
+
+  # ── 2등급: 시스템 변경·설치·외부 통신 ──
+  - id: cmd.git.other
+    match: { command: git }
+    grade: 2
+    reason: 분류되지 않은 git 명령
+    fallback: true
+  - id: cmd.brew.install
+    match:
+      {
+        command: brew,
+        subcommand: [install, uninstall, upgrade, reinstall, tap, untap, remove, rm],
+      }
+    grade: 2
+    reason: Homebrew 패키지 설치·변경
+    network: true
+  - id: cmd.brew.other
+    match: { command: brew }
+    grade: 2
+    reason: 분류되지 않은 Homebrew 명령
+    fallback: true
+  - id: cmd.npm.global
+    match: { command: [npm, pnpm, yarn], flags_any: ["-g", "--global"] }
+    grade: 2
+    reason: 전역 npm 패키지 설치
+    network: true
+  - id: cmd.pkg.install
+    match:
+      {
+        command: [pip, pip3, gem, pipx, cargo, go, npm, pnpm, yarn, bun],
+        subcommand: [install, i, add, uninstall, remove, upgrade, update, run, exec, x],
+      }
+    grade: 2
+    reason: 패키지 설치·스크립트 실행
+    network: true
+  - id: cmd.pkg.runner
+    match: { command: [npx, pnpx, bunx, pipx, uvx] }
+    grade: 2
+    reason: 패키지를 받아 실행
+    network: true
+  - id: cmd.launchctl
+    match: { command: launchctl }
+    grade: 2
+    reason: 로그인 항목·환경 변수 등록
+  - id: cmd.crontab
+    match: { command: crontab }
+    grade: 2
+    reason: 예약 작업 변경 (예약할 명령도 판정)
+    handler: scheduler
+  - id: cmd.at
+    match: { command: [at, batch] }
+    grade: 2
+    reason: 나중에 실행할 명령 예약 (예약할 명령도 판정)
+    handler: scheduler
+  - id: cmd.defaults.write
+    match: { command: defaults, subcommand: [write, delete, import, rename] }
+    grade: 2
+    reason: 앱 설정 변경
+  - id: cmd.kill
+    match: { command: [kill, pkill] }
+    grade: 2
+    reason: 프로세스 종료
+  - id: cmd.chmod
+    match: { command: chmod }
+    grade: 2
+    reason: 실행 권한 변경
+    paths: { op: write, args: after_first, outside_home: 3 }
+  - id: cmd.ssh
+    match: { command: ssh }
+    grade: 2
+    reason: 원격 접속 (원격 명령 문자열도 판정)
+    handler: ssh
+    network: true
+  - id: cmd.git.remote
+    match: { command: git, subcommand: [pull, fetch, clone, push, remote, submodule] }
+    grade: 2
+    reason: 원격 저장소 통신
+    network: true
+  - id: cmd.docker
+    match: { command: docker, subcommand: [pull, run, build, push, compose, exec, create] }
+    grade: 2
+    reason: 컨테이너 실행·이미지 받기 (마운트하는 경로도 판정)
+    handler: docker
+    network: true
+  - id: cmd.git.config_exec
+    match:
+      command: git
+      args_regex_any:
+        [
+          "^(core\\.(sshCommand|pager|editor|fsmonitor|hooksPath|askPass)|alias\\.[^=]+|credential\\.helper|sequence\\.editor|diff\\..+\\.(textconv|command)|filter\\..+\\.(clean|smudge|process)|uploadpack\\.packObjectsHook)(=|$)",
+        ]
+    grade: 2
+    reason: 명령을 실행하는 git 설정 (값도 판정)
+    handler: git_config
+  - id: cmd.assign
+    match: { command: ["(assign)", export, declare, typeset, readonly, local, unset] }
+    grade: 0
+    reason: 셸 변수 설정
+  - id: cmd.export_path
+    match:
+      {
+        command: ["(assign)", export, declare, typeset, readonly, local],
+        args_regex_any: ["^(PATH|DYLD_[A-Z_]+|LD_[A-Z_]+|BASH_ENV|ENV|PROMPT_COMMAND|IFS)="],
+      }
+    grade: 2
+    reason: 실행 경로·셸 동작을 바꾸는 환경 변수
+  - id: cmd.shopt_alias
+    match: { command: shopt, args_any: [expand_aliases] }
+    grade: 2
+    reason: 별칭 확장 켜기
+  - id: cmd.wrapper
+    match:
+      {
+        command:
+          [
+            env,
+            command,
+            builtin,
+            exec,
+            nohup,
+            nice,
+            time,
+            timeout,
+            caffeinate,
+            arch,
+            stdbuf,
+            xcrun,
+            coproc,
+          ],
+      }
+    grade: 0
+    reason: 다른 명령을 감싸는 명령 (안쪽 명령으로 판정)
+    handler: wrapper
+  - id: cmd.shell
+    match: { command: [bash, sh, zsh, dash, ksh, fish, tcsh, csh] }
+    grade: 2
+    reason: 셸 실행 (안쪽 명령을 다시 파싱)
+    handler: shell
+    session_allow: false
+  - id: cmd.source
+    match: { command: [source, "."] }
+    grade: 2
+    reason: 스크립트 불러와 실행
+    handler: source
+    session_allow: false
+  - id: cmd.eval
+    match: { command: eval }
+    grade: 2
+    reason: 동적 실행 (코드를 그대로 표시)
+    handler: eval
+    session_allow: false
+  - id: cmd.interpreter
+    match:
+      command:
+        [
+          python,
+          python2,
+          python3,
+          node,
+          nodejs,
+          perl,
+          ruby,
+          php,
+          osascript,
+          swift,
+          lua,
+          tclsh,
+          expect,
+          deno,
+          bun,
+          tsx,
+          ts-node,
+          Rscript,
+        ]
+      unless_sole_arg: ["--version", "-v", "-V", "version"]
+    grade: 2
+    reason: 스크립트 언어 실행 (코드를 그대로 표시)
+    handler: interpreter
+    network: true
+    session_allow: false
+  - id: cmd.awk_program
+    match: { command: [awk, gawk, nawk] }
+    grade: 0
+    reason: awk (system()·파이프가 있으면 2등급)
+    handler: awk
+  - id: cmd.xargs
+    match: { command: xargs }
+    grade: 2
+    reason: 입력으로 다른 명령 실행
+    handler: xargs
+    session_allow: false
+  - id: cmd.find.delete
+    match: { command: find, args_any: ["-delete"] }
+    grade: 1
+    reason: find -delete → 휴지통 이동으로 치환
+    handler: find
+  - id: cmd.find.exec
+    match: { command: find, args_any: ["-exec", "-execdir", "-ok", "-okdir"] }
+    grade: 2
+    reason: find로 다른 명령 실행
+    handler: find
+    session_allow: false
+
+  # ── 3등급: 파괴적·권한 상승 ──
+  - id: cmd.sudo
+    match: { command: [sudo, su, doas] }
+    grade: 3
+    reason: 관리자 권한 실행
+    handler: wrapper
+  - id: cmd.git.reset_hard
+    match: { command: git, subcommand: [reset], args_any: ["--hard"] }
+    grade: 3
+    reason: 작업 내용 버리기 (되돌리기 어려움)
+  - id: cmd.git.clean
+    match: { command: git, subcommand: [clean], flags_any: ["-f", "--force"] }
+    grade: 3
+    reason: 추적 안 되는 파일 영구 삭제
+  - id: cmd.git.push_force
+    match:
+      {
+        command: git,
+        subcommand: [push],
+        flags_any:
+          [
+            "-f",
+            "--force",
+            "--force-with-lease",
+            "--force-if-includes",
+            "--mirror",
+            "--delete",
+            "-d",
+          ],
+      }
+    grade: 3
+    reason: 원격 기록 덮어쓰기·삭제
+    network: true
+  - id: cmd.git.push_force_refspec
+    match: { command: git, subcommand: [push], args_regex_any: ["^\\+", "^:"] }
+    grade: 3
+    reason: 원격 기록 덮어쓰기·삭제 (+refspec, :branch)
+    network: true
+  - id: cmd.docker.prune
+    match: { command: docker, subcommand: [system, image, volume, container], args_any: [prune] }
+    grade: 3
+    reason: 도커 데이터 일괄 삭제
+  - id: cmd.brew.prune_all
+    match: { command: brew, subcommand: [cleanup], args_prefix_any: ["--prune=all"] }
+    grade: 3
+    reason: Homebrew 캐시 전부 삭제
+  - id: cmd.chown
+    match: { command: [chown, chgrp] }
+    grade: 3
+    reason: 소유권 변경
+    paths: { op: write, args: after_first }
+  - id: cmd.chmod_recursive
+    match: { command: chmod, flags_any: ["-R"] }
+    grade: 3
+    reason: 권한 일괄 변경
+    paths: { op: write, args: after_first, recursive: always }
+  - id: cmd.system_settings
+    match:
+      {
+        command:
+          [
+            networksetup,
+            pmset,
+            scutil,
+            killall,
+            systemsetup,
+            nvram,
+            kextload,
+            kextunload,
+            dscl,
+            sysadminctl,
+          ],
+      }
+    grade: 3
+    reason: 시스템·네트워크 설정 변경
+  - id: cmd.osascript_admin
+    match: { command: osascript, args_regex_any: ["with administrator privileges"] }
+    grade: 3
+    reason: AppleScript 관리자 권한 실행
+
+  # ── 차단 ──
+  - id: block.disk_format
+    match: { command: [mkfs, newfs_apfs, newfs_hfs, newfs_msdos, newfs_exfat, fdisk, gpt] }
+    grade: block
+    reason: 디스크 포맷·파티션 변경
+  - id: block.diskutil
+    match:
+      {
+        command: diskutil,
+        subcommand:
+          [
+            eraseDisk,
+            eraseVolume,
+            partitionDisk,
+            zeroDisk,
+            randomDisk,
+            secureErase,
+            reformat,
+            apfs,
+          ],
+      }
+    grade: block
+    reason: 디스크 지우기·파티션 변경
+  - id: block.dd_device
+    match: { command: dd, args_prefix_any: ["of=/dev/"] }
+    grade: block
+    reason: 장치에 직접 쓰기
+  - id: block.csrutil
+    match: { command: csrutil, subcommand: [disable, clear, authenticated-root] }
+    grade: block
+    reason: 시스템 무결성 보호(SIP) 해제
+  - id: block.spctl
+    match: { command: spctl, args_any: ["--master-disable", "--global-disable", "--disable"] }
+    grade: block
+    reason: Gatekeeper 끄기
+  - id: block.fdesetup
+    match: { command: fdesetup, subcommand: [disable] }
+    grade: block
+    reason: FileVault 끄기
+  - id: block.firewall_off
+    match: { command: [socketfilterfw, pfctl], args_any: ["off", "-d", "--setglobalstate"] }
+    grade: block
+    reason: 방화벽 끄기
+  - id: block.firewall_defaults
+    match: { command: defaults, args_regex_any: ["com\\.apple\\.alf"] }
+    grade: block
+    reason: 방화벽 설정 변경
+  - id: block.keychain_dump
+    match: { command: security, subcommand: [dump-keychain, export, export-keychain] }
+    grade: block
+    reason: 키체인 내용 추출
+  - id: block.keychain_password
+    match:
+      {
+        command: security,
+        args_regex_any: ["^-[a-zA-Z]*w[a-zA-Z]*$"],
+        subcommand: [find-generic-password, find-internet-password],
+      }
+    grade: block
+    reason: 키체인 비밀번호 출력
+  - id: block.history_clear
+    match: { command: history, flags_any: ["-c", "-d", "-p"] }
+    grade: block
+    reason: 셸 기록 지우기 (흔적 삭제)
+
+# ───────────────────────── 네트워크 규칙 ─────────────────────────
+network:
+  - id: net.curl
+    match: { command: curl }
+    grade: 2
+    reason: 외부 통신·다운로드
+    handler: curl
+    network: true
+  - id: net.wget
+    match: { command: wget }
+    grade: 2
+    reason: 외부 통신·다운로드
+    handler: wget
+    network: true
+  - id: net.transfer
+    match: { command: [scp, rsync, sftp] }
+    grade: 1
+    reason: 파일 전송 (원격 대상이면 업로드 3등급)
+    handler: transfer
+    network: true
+  - id: net.raw_socket
+    match: { command: [nc, ncat, netcat, socat, telnet, ftp] }
+    grade: 3
+    reason: 원시 소켓으로 데이터 전송
+    network: true
+
+# ───────────────────────── 엔진 판정 ─────────────────────────
+# 코드(핸들러)가 내는 판정. 등급은 여기서 정한다.
+engine:
+  - {
+      id: cmd.unclassified,
+      grade: 2,
+      reason: 규칙에 없는 명령 (미분류 기본값),
+      session_allow: true,
+    }
+  - { id: parse.unparseable, grade: 2, reason: 구문을 분석할 수 없음 }
+  - { id: cmd.dynamic_name, grade: 2, reason: 명령 이름이 실행 전에 정해지지 않음 }
+  - { id: path.dynamic, grade: 2, reason: 대상 경로가 실행 전에 정해지지 않음 }
+  - { id: cmd.shell.depth_exceeded, grade: 2, reason: 셸 중첩이 너무 깊어 분석 중단 }
+  - { id: cmd.shell.dynamic, grade: 2, reason: 셸에 넘기는 내용이 실행 전에 정해지지 않음 }
+  - { id: cmd.exec.script, grade: 2, reason: 스크립트·실행 파일 실행 (내용까지 판정) }
+  - {
+      id: cmd.exec.agent_written,
+      grade: 2,
+      reason: 이번 세션에 에이전트가 작성한 파일 실행 (내용까지 판정),
+    }
+  - { id: cmd.remote_script, grade: 3, reason: 내려받은 내용을 바로 실행 (미리 볼 수 없음) }
+  - { id: cmd.dynamic_code, grade: 2, reason: 동적 코드 실행 (코드를 그대로 표시) }
+  - { id: cmd.rm.bulk, grade: 2, reason: 대량 삭제 (50개 또는 1GB 초과) }
+  - { id: cmd.rm.permanent, grade: 3, reason: 휴지통으로 치환할 수 없는 영구 삭제 }
+  - { id: cmd.find.unbounded, grade: 2, reason: 보호 경로를 포함할 수 있는 범위에서 find로 삭제 }
+  - { id: net.upload, grade: 3, reason: 파일·데이터 업로드 }
+  - { id: net.download, grade: 2, reason: 원격에서 파일 받기 }
+  - { id: block.delete_home_or_root, grade: block, reason: 홈 또는 루트 전체 삭제 }
+  - { id: block.credential_exfil, grade: block, reason: 자격증명 내용을 외부로 보낼 수 있음 }
+  - { id: block.fork_bomb, grade: block, reason: 포크 밤 패턴 }
+  - { id: tool.unknown, grade: 2, reason: 분류되지 않은 도구 }
+  - { id: tool.web, grade: 0, reason: 웹 검색·페이지 가져오기 }
+  - { id: tool.file_read, grade: 0, reason: 파일 읽기·검색 도구 }
+  - { id: tool.file_write, grade: 1, reason: 파일 쓰기·편집 도구 (체크포인트 후 수정) }
+
+# 동적 코드(python -c, osascript -e, eval 문자열, awk 프로그램 등) 안의 위험 표시
+code_tokens:
+  - id: code.private_key
+    tokens: ["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "Library/Keychains", "login.keychain"]
+    grade: block
+    reason: 동적 코드가 개인키·키체인을 가리킴
+  - id: code.browser_secrets
+    tokens: ["Login Data", "cookies.sqlite", "logins.json", "key4.db", "Library/Cookies"]
+    grade: block
+    reason: 동적 코드가 브라우저 쿠키·비밀번호를 가리킴
+  - id: code.keychain_cli
+    tokens: ["find-generic-password", "find-internet-password", "dump-keychain"]
+    grade: block
+    reason: 동적 코드가 키체인 비밀번호를 꺼냄

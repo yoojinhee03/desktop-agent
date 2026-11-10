@@ -6,6 +6,8 @@ packages:
 # 빌드 스크립트 실행을 허용할 의존성만 명시한다 (pnpm 기본값은 전부 차단)
 allowBuilds:
   esbuild: true
+  # 네이티브 빌드용 스크립트. policy-core는 웹어셈블리판만 쓰므로 실행하지 않는다
+  tree-sitter-bash: false
 
 # pnpm 12의 최소 공개 기간 정책 예외: Agent SDK 0.3.322가 공개 직후라 설치 시 pnpm이 자동 추가함.
 # SDK를 공개 기간이 지난 버전으로 올리면 이 목록을 지운다.
