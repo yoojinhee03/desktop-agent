@@ -209,6 +209,9 @@ importers:
       '@desktop-agent/adapter-agent-sdk':
         specifier: workspace:*
         version: link:../packages/adapter-agent-sdk
+      '@desktop-agent/audit-log':
+        specifier: workspace:*
+        version: link:../packages/audit-log
       '@desktop-agent/cli':
         specifier: workspace:*
         version: link:../apps/cli

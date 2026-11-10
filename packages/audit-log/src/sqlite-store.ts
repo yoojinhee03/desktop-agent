@@ -62,6 +62,39 @@ function appendRow(db: DatabaseSync, entry: AuditEntry, now: () => Date): Stored
   }
 }
 
+/** 저장된 기록 한 건 (재생·분석용) */
+export interface RecordedEntry {
+  id: number;
+  createdAt: string;
+  entry: AuditEntry;
+}
+
+export interface AuditReader {
+  verify(): VerifyResult;
+  entries(): Generator<RecordedEntry>;
+  close(): void;
+}
+
+const KINDS = new Set(["request", "decision", "filter"]);
+
+function parseEntry(row: StoredRow): RecordedEntry {
+  const { createdAt: _c, ...rest } = JSON.parse(row.payload) as AuditEntry & { createdAt: string };
+  if (!KINDS.has(rest.kind)) throw new Error(`알 수 없는 기록 종류 (${row.id}번 행): ${rest.kind}`);
+  return { id: row.id, createdAt: row.createdAt, entry: rest };
+}
+
+/** 읽기 전용으로 연다 (재생·분석이 감사 로그를 바꾸지 않게) */
+export function openAuditLogReadOnly(path: string): AuditReader {
+  const db = new DatabaseSync(path, { readOnly: true });
+  return {
+    verify: () => verifyChain(iterateRows(db)),
+    *entries() {
+      for (const row of iterateRows(db)) yield parseEntry(row);
+    },
+    close: () => db.close(),
+  };
+}
+
 export function openAuditLog(path: string, now: () => Date = () => new Date()): AuditLog {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL");

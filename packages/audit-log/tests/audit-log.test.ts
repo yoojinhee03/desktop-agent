@@ -101,3 +101,26 @@ describe("audit log 해시 체인", () => {
     log.close();
   });
 });
+
+describe("읽기 전용 열기 (재생용)", () => {
+  it("기록을 순서대로 돌려주고, 감사 로그를 바꾸지 않는다", async () => {
+    seed(3);
+    const { openAuditLogReadOnly } = await import("../src/index.ts");
+    const reader = openAuditLogReadOnly(dbPath);
+    const entries = [...reader.entries()];
+    expect(entries.map((e) => e.entry.kind)).toEqual(["request", "decision", "decision"]);
+    expect(entries[0]?.entry).toEqual(request);
+    expect(reader.verify()).toEqual({ ok: true, rows: 3 });
+    reader.close();
+  });
+
+  it("읽기 전용으로 연 DB에는 쓸 수 없다", async () => {
+    seed(1);
+    const { openAuditLogReadOnly } = await import("../src/index.ts");
+    const reader = openAuditLogReadOnly(dbPath);
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    expect(() => db.exec("DELETE FROM audit_log")).toThrow();
+    db.close();
+    reader.close();
+  });
+});

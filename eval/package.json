@@ -6,10 +6,12 @@
   "scripts": {
     "scenarios": "tsx src/main.ts",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "replay": "tsx src/replay/main.ts"
   },
   "dependencies": {
     "@desktop-agent/adapter-agent-sdk": "workspace:*",
+    "@desktop-agent/audit-log": "workspace:*",
     "@desktop-agent/cli": "workspace:*",
     "@desktop-agent/policy-core": "workspace:*",
     "yaml": "2.9.1",
