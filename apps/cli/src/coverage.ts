@@ -11,6 +11,8 @@ export interface CoverageReport {
 }
 
 const SHELL = /(^Bash$|__shell$)/;
+/** 출력이 프라이버시 필터를 거쳐야 하는 도구: 자체 MCP 도구 (웹 도구 결과는 공개된 외부 내용이라 대상 아님) */
+const FILTERED = /^mcp__agent__/;
 
 /** 모델이 요청한 도구 호출을 정책 엔진 판정·프라이버시 필터 기록과 대조한다. */
 export class CoverageTracker {
@@ -28,7 +30,8 @@ export class CoverageTracker {
 
   recordGate(event: GateEvent): void {
     this.gated.add(event.toolUseId);
-    if (event.executedInput !== null) this.allowed.add(event.toolUseId);
+    const mustFilter = FILTERED.test(event.call.toolName);
+    if (event.executedInput !== null && mustFilter) this.allowed.add(event.toolUseId);
   }
 
   recordFilter(event: FilterEvent): void {

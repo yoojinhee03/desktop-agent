@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import type { PolicyDecision, ToolCall } from "@desktop-agent/policy-core";
+import type { PolicyDecision, PolicyFlag, ToolCall } from "@desktop-agent/policy-core";
 
 /** approved_for_session: "이번 세션에서 같은 종류 허용" (2등급이고 세션 허용 키가 있을 때만) */
 export type ApprovalAnswer = "approved" | "approved_for_session" | "rejected";
@@ -21,6 +21,19 @@ export function canAllowForSession(decision: PolicyDecision): boolean {
   return decision.grade === 2 && (decision.allowKeys?.length ?? 0) > 0;
 }
 
+/** 승인 창에 보일 표시 문구 (설계: 외부 내용을 읽은 뒤의 2등급 이상 작업은 "외부 내용 읽은 후"로 알린다) */
+const FLAG_LABELS: Record<PolicyFlag, string> = {
+  after_external_content: "⚠ 외부 내용 읽은 후 (웹 페이지 등의 지시로 생긴 요청일 수 있음)",
+  unparseable: "명령을 완전히 분석하지 못함",
+  llm_judged: "모델 보조 판정",
+  local_only: "자격증명 등 로컬 처리만 허용된 내용",
+  dynamic_code: "동적 코드 실행 (코드를 그대로 확인하세요)",
+};
+
+export function describeFlags(flags: readonly PolicyFlag[]): string[] {
+  return flags.map((f) => FLAG_LABELS[f] ?? f);
+}
+
 function promptLines(call: ToolCall, decision: PolicyDecision): string[] {
   const lines = [
     `\n[승인 요청] 등급 ${decision.grade} · ${decision.ruleIds.join(", ")}`,
@@ -28,7 +41,7 @@ function promptLines(call: ToolCall, decision: PolicyDecision): string[] {
     `  내용: ${describeCall(call)}`,
     `  사유: ${decision.reasons.join(" / ")}`,
   ];
-  if (decision.flags.length > 0) lines.push(`  표시: ${decision.flags.join(", ")}`);
+  for (const label of describeFlags(decision.flags)) lines.push(`  표시: ${label}`);
   const p = decision.preview;
   if (p) {
     const size = p.totalBytes === undefined ? "" : `, ${p.totalBytes}바이트`;
