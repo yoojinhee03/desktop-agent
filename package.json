@@ -1,6 +1,7 @@
 {
   "name": "desktop-agent",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "packageManager": "pnpm@12.18.0",
   "engines": {

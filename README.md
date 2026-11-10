@@ -12,3 +12,7 @@ corepack pnpm --filter cli dev
 ```
 
 에이전트 실행 확인은 `$TMPDIR/desktop-agent-sandbox`에서만 한다.
+
+## 라이선스
+
+[Apache License 2.0](LICENSE)
