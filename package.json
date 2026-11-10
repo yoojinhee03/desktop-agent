@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "corepack pnpm -r typecheck",
     "lint": "biome check ."
   },
   "devDependencies": {

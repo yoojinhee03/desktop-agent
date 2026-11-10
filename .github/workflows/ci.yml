@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 기본 토큰은 읽기 전용으로만 쓴다.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint · typecheck · test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS가 M1 대상 OS, Linux는 정책 코어가 OS 비의존인지 확인용
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      # 액션은 태그가 아니라 커밋 SHA로 고정한다 (공급망 보호)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      # 로컬과 같은 방식: corepack enable 없이 package.json의 packageManager 버전으로 실행
+      - name: Install
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: corepack pnpm lint
+
+      - name: Typecheck
+        run: corepack pnpm typecheck
+
+      - name: Test
+        run: corepack pnpm test
