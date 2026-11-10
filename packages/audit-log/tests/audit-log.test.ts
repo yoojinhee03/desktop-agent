@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type AuditEntry, canonicalJson, type DecisionEntry, openAuditLog } from "../src/index.ts";
+import {
+  type AuditEntry,
+  canonicalJson,
+  chainHash,
+  type DecisionEntry,
+  openAuditLog,
+} from "../src/index.ts";
 
 let dir: string;
 let dbPath: string;
@@ -41,6 +47,16 @@ function tamper(sql: string): void {
   db.close();
 }
 
+/** 공격자가 한 행의 내용을 바꾸고, 그 행만 보면 맞도록 해시를 다시 계산해 넣는 경우 */
+function rewriteRowWithValidHash(id: number): void {
+  const db = new DatabaseSync(dbPath);
+  const row = db.prepare("SELECT payload, prev_hash FROM audit_log WHERE id = ?").get(id);
+  const payload = String(row?.payload).replace("approved", "rejected");
+  const hash = chainHash(String(row?.prev_hash), payload);
+  db.prepare("UPDATE audit_log SET payload = ?, hash = ? WHERE id = ?").run(payload, hash, id);
+  db.close();
+}
+
 describe("canonicalJson", () => {
   it("키 순서와 무관하게 같은 문자열", () => {
     expect(canonicalJson({ b: 1, a: [{ d: 2, c: 3 }] })).toBe(
@@ -74,12 +90,11 @@ describe("audit log 해시 체인", () => {
     log.close();
   });
 
-  it("행 내용과 해시를 함께 바꿔도 다음 행에서 걸린다", () => {
+  it("행 내용을 고치고 그 행의 해시까지 다시 계산해도 다음 행에서 걸린다", () => {
     seed(4);
-    tamper(`UPDATE audit_log SET hash = 'f' || substr(hash, 2) WHERE id = 2`);
+    rewriteRowWithValidHash(2);
     const log = openAuditLog(dbPath);
-    const result = log.verify();
-    expect(result.ok).toBe(false);
+    expect(log.verify()).toMatchObject({ ok: false, brokenAtId: 3, reason: "prev_mismatch" });
     log.close();
   });
 });
