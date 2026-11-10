@@ -6,5 +6,14 @@
   "scripts": {
     "dev": "tsx src/main.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.322",
+    "@desktop-agent/adapter-agent-sdk": "workspace:*",
+    "@desktop-agent/audit-log": "workspace:*",
+    "@desktop-agent/policy-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2"
   }
 }
