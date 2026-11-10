@@ -185,3 +185,25 @@ describe("승인 창 표시 문구", () => {
     expect(shown).toContain("s: 이번 세션에서 같은 종류 허용");
   });
 });
+
+describe("승인이 필요한 치환 (ask + rewrite)", () => {
+  const askRewrite: PolicyDecision = { ...base, rewrite: "/usr/bin/trash ./a.pdf" };
+
+  it("승인하면 원래 명령이 아니라 치환된 명령을 실행한다", async () => {
+    const { specific, events } = await run(askRewrite, "approved");
+    expect(specific.permissionDecision).toBe("allow");
+    expect(specific.updatedInput).toEqual({ command: "/usr/bin/trash ./a.pdf" });
+    expect(events[0]?.executedInput).toEqual({ command: "/usr/bin/trash ./a.pdf" });
+  });
+
+  it("세션 허용으로 승인해도 치환된 명령을 실행한다", async () => {
+    const { specific } = await run({ ...askRewrite, allowKeys: ["k"] }, "approved_for_session");
+    expect(specific.updatedInput).toEqual({ command: "/usr/bin/trash ./a.pdf" });
+  });
+
+  it("거절하면 아무것도 실행하지 않는다", async () => {
+    const { specific } = await run(askRewrite, "rejected");
+    expect(specific.permissionDecision).toBe("deny");
+    expect(specific.updatedInput).toBeUndefined();
+  });
+});
