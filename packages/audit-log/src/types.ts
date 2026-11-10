@@ -1,4 +1,4 @@
-import type { Grade, PolicyAction } from "@desktop-agent/policy-core";
+import type { ChangePreview, Grade, PolicyAction, PolicyFlag } from "@desktop-agent/policy-core";
 
 /** 사용자 요청 한 건 */
 export interface RequestEntry {
@@ -17,7 +17,15 @@ export interface DecisionEntry {
   grade: Grade | null; // decide()가 실패하면 null
   action: PolicyAction | null;
   ruleIds: string[];
-  outcome: string; // auto_allowed | approved | rejected | denied | rewritten | error
+  reasons: string[];
+  flags: PolicyFlag[];
+  /** 영향 범위(대상 경로·개수·크기). 휴지통 치환이면 원래 경로가 여기와 input에 남아 실행 취소에 쓴다 */
+  preview?: ChangePreview;
+  // auto_allowed | approved | approved_for_session | rejected | denied | rewritten | error
+  outcome: string;
+  /** 실행을 결정한 주체: policy 또는 승인자 id (user:terminal, script:…) */
+  decidedBy: string;
+  /** 실제 실행된 입력. rewrite면 치환된 명령, 거부면 null */
   executedInput: Record<string, unknown> | null;
   error?: string;
 }

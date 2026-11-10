@@ -54,6 +54,8 @@ function bashIsSafe(command: string, sandbox: Sandbox): boolean {
  * 자동 확인 실행용 승인 판단: 샌드박스 안의 읽기 전용 호출만 승인하고 나머지는 거절한다.
  * 사람이 직접 쓸 때는 터미널 y/n 승인을 쓴다.
  */
+export const SANDBOX_JUDGE_ID = "sandbox-readonly";
+
 export function sandboxReadOnlyJudge(sandbox: Sandbox) {
   return (call: ToolCall): ApprovalAnswer => {
     if (call.toolName === "Bash") {

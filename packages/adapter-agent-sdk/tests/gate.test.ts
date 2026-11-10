@@ -1,50 +1,48 @@
-import type { HookInput, SyncHookJSONOutput } from "@anthropic-ai/claude-agent-sdk";
 import type { PolicyDecision } from "@desktop-agent/policy-core";
 import { describe, expect, it } from "vitest";
-import { createPolicyGate, createScriptedApprover, type GateEvent } from "../src/index.ts";
+import {
+  type ApprovalAnswer,
+  createPolicyGate,
+  createScriptedApprover,
+  type GateEvent,
+} from "../src/index.ts";
+import { baseContext, callHook, preToolUse } from "./helpers.ts";
 
-const base: PolicyDecision = { grade: 2, action: "ask", ruleIds: ["t"], reasons: ["r"], flags: [] };
+const base: PolicyDecision = {
+  grade: 2,
+  action: "ask",
+  ruleIds: ["t"],
+  reasons: ["r"],
+  flags: [],
+};
 
-function preToolUse(command: string): HookInput {
-  return {
-    hook_event_name: "PreToolUse",
-    tool_name: "Bash",
-    tool_input: { command },
-    tool_use_id: "tu_1",
-    session_id: "s",
-    transcript_path: "/dev/null",
-    cwd: "/tmp",
-  } as HookInput;
-}
-
-async function run(decision: PolicyDecision | Error, answer: "approved" | "rejected" = "approved") {
+function makeGate(decision: PolicyDecision | Error, answer: ApprovalAnswer = "approved") {
   const events: GateEvent[] = [];
   const gate = createPolicyGate({
     decide: () => {
       if (decision instanceof Error) throw decision;
       return decision;
     },
-    approver: createScriptedApprover(() => answer),
+    context: baseContext(),
+    approver: createScriptedApprover("test", () => answer),
     onEvent: (e) => {
       events.push(e);
     },
   });
-  const hook = gate.hooks.PreToolUse?.[0]?.hooks[0];
-  if (!hook) throw new Error("PreToolUse 훅이 없음");
-  const out = (await hook(preToolUse("ls"), "tu_1", {
-    signal: new AbortController().signal,
-  })) as SyncHookJSONOutput;
-  const specific = out.hookSpecificOutput;
-  if (specific?.hookEventName !== "PreToolUse") throw new Error("PreToolUse 출력이 아님");
-  return { specific, events };
+  return { gate, events };
 }
 
-describe("createPolicyGate", () => {
-  it("ask + 승인이면 allow, 이벤트를 남긴다", async () => {
+async function run(decision: PolicyDecision | Error, answer: ApprovalAnswer = "approved") {
+  const { gate, events } = makeGate(decision, answer);
+  const specific = await callHook(gate, preToolUse("Bash", { command: "ls" }));
+  return { specific, events, gate };
+}
+
+describe("판정 처리", () => {
+  it("ask + 승인이면 allow, 승인자 id를 남긴다", async () => {
     const { specific, events } = await run(base, "approved");
     expect(specific.permissionDecision).toBe("allow");
-    expect(events).toHaveLength(1);
-    expect(events[0]?.outcome).toBe("approved");
+    expect(events[0]).toMatchObject({ outcome: "approved", decidedBy: "script:test" });
     expect(events[0]?.call).toEqual({ toolName: "Bash", input: { command: "ls" } });
   });
 
@@ -54,9 +52,9 @@ describe("createPolicyGate", () => {
   });
 
   it("deny 판정은 승인을 묻지 않고 거부", async () => {
-    const { specific, events } = await run({ ...base, grade: "block", action: "deny" }, "approved");
+    const { specific, events } = await run({ ...base, grade: "block", action: "deny" });
     expect(specific.permissionDecision).toBe("deny");
-    expect(events[0]?.outcome).toBe("denied");
+    expect(events[0]).toMatchObject({ outcome: "denied", decidedBy: "policy" });
   });
 
   it("rewrite는 치환된 명령으로 실행", async () => {
@@ -77,14 +75,81 @@ describe("createPolicyGate", () => {
   });
 
   it("canUseTool 안전망은 항상 거부", async () => {
-    const gate = createPolicyGate({
-      decide: () => base,
-      approver: createScriptedApprover(() => "approved"),
-    });
+    const { gate } = makeGate(base);
     const result = await gate.canUseTool("Bash", {}, {
       signal: new AbortController().signal,
       toolUseID: "x",
     } as never);
     expect(result?.behavior).toBe("deny");
+  });
+});
+
+describe("세션 상태", () => {
+  const sessionable: PolicyDecision = { ...base, allowKeys: ["cmd.brew.install"] };
+
+  it("세션 허용을 고르면 allowKeys가 세션에 쌓인다", async () => {
+    const { gate } = await run(sessionable, "approved_for_session");
+    expect(gate.session().allowKeys).toEqual(["cmd.brew.install"]);
+  });
+
+  it("실행된 호출의 작성 파일·오염 경로를 기록한다", async () => {
+    const effects = { writes: ["/tmp/cleanup.sh"], tainted: ["/tmp/copy"] };
+    const { gate } = await run({ ...base, effects }, "approved");
+    expect(gate.session()).toMatchObject({
+      writtenFiles: ["/tmp/cleanup.sh"],
+      taintedFiles: ["/tmp/copy"],
+    });
+  });
+
+  it("거절된 호출은 기록하지 않는다", async () => {
+    const effects = { writes: ["/tmp/cleanup.sh"], tainted: [] };
+    const { gate } = await run({ ...base, effects }, "rejected");
+    expect(gate.session().writtenFiles).toEqual([]);
+  });
+
+  it("웹 도구를 쓰면 외부 콘텐츠 표시, 요청이 끝나면 내린다", async () => {
+    const web: PolicyDecision = { ...base, grade: 0, action: "allow", ruleIds: ["tool.web"] };
+    const { gate } = await run(web);
+    expect(gate.session().externalContent).toBe(true);
+    gate.endUserRequest();
+    expect(gate.session().externalContent).toBe(false);
+  });
+
+  it("판정마다 최신 세션 상태를 decide()에 넘긴다", async () => {
+    const seen: string[][] = [];
+    const gate = createPolicyGate({
+      decide: (_call, ctx) => {
+        seen.push(ctx.session.writtenFiles);
+        return { ...base, effects: { writes: [`/tmp/f${seen.length}`], tainted: [] } };
+      },
+      context: baseContext(),
+      approver: createScriptedApprover("test", () => "approved"),
+    });
+    await callHook(gate, preToolUse("Bash", { command: "a" }, "t1"));
+    await callHook(gate, preToolUse("Bash", { command: "b" }, "t2"));
+    expect(seen).toEqual([[], ["/tmp/f1"]]);
+  });
+
+  it("동시에 들어온 호출의 승인을 겹치지 않게 하나씩 처리한다", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const gate = createPolicyGate({
+      decide: () => base,
+      context: baseContext(),
+      approver: {
+        id: "slow",
+        ask: async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((r) => setTimeout(r, 10));
+          active -= 1;
+          return "approved";
+        },
+      },
+    });
+    await Promise.all(
+      ["t1", "t2", "t3"].map((id) => callHook(gate, preToolUse("Bash", { command: id }, id))),
+    );
+    expect(maxActive).toBe(1);
   });
 });

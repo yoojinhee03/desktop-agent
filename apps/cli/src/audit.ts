@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GateEvent } from "@desktop-agent/adapter-agent-sdk";
@@ -16,6 +16,15 @@ export function dataDir(sandbox: boolean): string {
   return dir;
 }
 
+/**
+ * 정책 엔진에 넘길 에이전트 내부 경로(글로브). 이 폴더의 쓰기·삭제는 차단된다.
+ * $TMPDIR는 /var/... 와 /private/var/... 두 표기가 있어 둘 다 넣는다.
+ */
+export function agentPathGlobs(dir: string): string[] {
+  const forms = [...new Set([dir, realpathSync(dir)])];
+  return forms.flatMap((d) => [d, `${d}/**`]);
+}
+
 /** 시작 시 해시 체인을 검증하고, 깨졌으면 어느 행부터인지 알린다. 기록은 계속한다. */
 export function openVerifiedLog(dir: string, log: (line: string) => void): AuditLog {
   const audit = openAuditLog(join(dir, "audit.sqlite"));
@@ -29,16 +38,21 @@ export function openVerifiedLog(dir: string, log: (line: string) => void): Audit
 }
 
 export function toDecisionEntry(requestId: string, event: GateEvent): DecisionEntry {
+  const d = event.decision;
   return {
     kind: "decision",
     requestId,
     toolUseId: event.toolUseId,
     toolName: event.call.toolName,
     input: event.call.input,
-    grade: event.decision?.grade ?? null,
-    action: event.decision?.action ?? null,
-    ruleIds: event.decision?.ruleIds ?? [],
+    grade: d?.grade ?? null,
+    action: d?.action ?? null,
+    ruleIds: d?.ruleIds ?? [],
+    reasons: d?.reasons ?? [],
+    flags: d?.flags ?? [],
+    ...(d?.preview ? { preview: d.preview } : {}),
     outcome: event.outcome,
+    decidedBy: event.decidedBy,
     executedInput: event.executedInput,
     ...(event.error ? { error: event.error } : {}),
   };

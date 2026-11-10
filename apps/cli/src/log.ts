@@ -6,7 +6,9 @@ export function formatGateEvent(event: GateEvent): string {
   const verdict = d
     ? `grade=${d.grade} action=${d.action} rules=${d.ruleIds.join(",")}`
     : "decide() 실패";
+  const rewrite = d?.rewrite ? ` rewrite=${JSON.stringify(d.rewrite)}` : "";
   const detail = event.error ? ` error=${event.error}` : "";
   const command = JSON.stringify(describeCall(event.call));
-  return `[policy] ${event.toolUseId} ${event.call.toolName} ${command} → ${verdict} → ${event.outcome}${detail}`;
+  const head = `[policy] ${event.toolUseId} ${event.call.toolName} ${command}`;
+  return `${head} → ${verdict}${rewrite} → ${event.outcome} by=${event.decidedBy}${detail}`;
 }
