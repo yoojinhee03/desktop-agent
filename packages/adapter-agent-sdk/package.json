@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.322",
-    "@desktop-agent/policy-core": "workspace:*"
+    "@desktop-agent/policy-core": "workspace:*",
+    "@desktop-agent/privacy-filter": "workspace:*",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.19.2"

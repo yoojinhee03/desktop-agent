@@ -30,7 +30,19 @@ export interface DecisionEntry {
   error?: string;
 }
 
-export type AuditEntry = RequestEntry | DecisionEntry;
+/** 프라이버시 필터 처리 한 건. 원문은 남기지 않고 마스킹 종류·개수와 전송 보류 여부만 남긴다 */
+export interface FilterEntry {
+  kind: "filter";
+  requestId: string;
+  toolUseId: string | null;
+  toolName: string;
+  maskings: { kind: string; count: number }[];
+  withheld: string | null;
+  /** 승인 장부에 없어 도구가 실행을 거부했으면 그 이유 */
+  refused?: string;
+}
+
+export type AuditEntry = RequestEntry | DecisionEntry | FilterEntry;
 
 /** 저장된 한 행. hash = sha256(prevHash + "\n" + canonical(entry + createdAt)) */
 export interface StoredRow {
