@@ -1,0 +1,54 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": { "includes": ["**", "!**/node_modules", "!**/dist"] },
+  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
+  "linter": {
+    "rules": {
+      "recommended": true,
+      "suspicious": { "noExplicitAny": "error" },
+      "style": { "noNonNullAssertion": "error" }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/policy-core/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@anthropic-ai/*", "@desktop-agent/*"],
+                    "message": "policy-core는 Agent SDK나 다른 내부 패키지에 의존하지 않는다 (개발: 저장소 구조와 개발 환경 > 의존 규칙)"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/privacy-filter/**", "packages/audit-log/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@anthropic-ai/*"],
+                    "message": "privacy-filter·audit-log는 Agent SDK에 의존하지 않는다"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

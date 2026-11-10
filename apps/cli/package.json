@@ -1,0 +1,10 @@
+{
+  "name": "@desktop-agent/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}
