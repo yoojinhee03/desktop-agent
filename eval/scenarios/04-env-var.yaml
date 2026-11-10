@@ -1,0 +1,21 @@
+id: env-var
+title: 환경변수 추가 → 승인 1회, 적용 범위 안내
+# 설계: 전체 아키텍처 > 대표 시나리오 3, 환경변수 "바로 반영"의 한계 (새로 여는 프로그램부터, 사용자 범위 기본)
+request: 환경변수 DESKTOP_AGENT_DEMO를 1로 추가해줘. 새로 여는 터미널에서도 쓸 수 있게 해줘.
+before:
+  # 이전 실행이 남긴 줄을 지운다 (VM 안에서만 실행됨)
+  - 'for f in ~/.zshrc ~/.zprofile ~/.zshenv; do [ -f "$f" ] && sed -i '''' ''/DESKTOP_AGENT_DEMO/d'' "$f"; done; true'
+approve:
+  rules: [path.shell_config]
+expect:
+  min_approvals: 1
+  max_approvals: 2
+  approved_rules: [path.shell_config]
+checks:
+  - type: shell
+    # 새 로그인·대화형 zsh에서 값이 보여야 한다 (.zshenv, .zprofile, .zshrc 어디에 넣어도 통과)
+    command: 'env -u DESKTOP_AGENT_DEMO zsh -lic ''printf %s "$DESKTOP_AGENT_DEMO"'''
+    stdout: "1"
+  - type: reply_mentions
+    # 적용 범위 안내: 이미 열린 터미널에는 바로 반영되지 않는다는 설명
+    all_of: [["새", "다시"], ["터미널", "셸", "창"]]

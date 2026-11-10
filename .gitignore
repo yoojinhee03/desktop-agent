@@ -5,3 +5,6 @@ dist/
 *.sqlite
 *.sqlite-*
 .env*
+
+# 시나리오 실행 결과 (VM에서 생성)
+eval/results/
