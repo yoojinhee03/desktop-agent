@@ -58,8 +58,8 @@ export function createRuntime(o: RuntimeOptions): Runtime {
   const audit = openVerifiedLog(o.dataDir, o.log);
   const coverage = new CoverageTracker();
   const requestId = randomUUID();
-  audit.append({ kind: "request", requestId, prompt: o.prompt });
   const home = homedir();
+  audit.append({ kind: "request", requestId, prompt: o.prompt, cwd: o.cwd, home });
   const context = { home, cwd: o.cwd, fs: nodeFs, agentPaths: agentPathGlobs(o.dataDir) };
   const ledger = new ApprovalLedger(agentSchemaKeys);
   const onEvent = gateRecorder(o, { audit, coverage }, requestId);

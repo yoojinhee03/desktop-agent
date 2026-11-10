@@ -5,6 +5,9 @@ export interface RequestEntry {
   kind: "request";
   requestId: string;
   prompt: string;
+  /** 판정 환경 (정책 재생 때 같은 기준으로 다시 판정하기 위함). 이전 기록에는 없을 수 있다 */
+  cwd?: string;
+  home?: string;
 }
 
 /** 도구 호출 판정 한 건: 명령, 등급, 처리 방식, 승인 결과 */
