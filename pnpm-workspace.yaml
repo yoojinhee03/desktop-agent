@@ -6,3 +6,5 @@ packages:
 # 빌드 스크립트 실행을 허용할 의존성만 명시한다 (pnpm 기본값은 전부 차단)
 allowBuilds:
   esbuild: true
+  # 네이티브 빌드용 스크립트. policy-core는 웹어셈블리판만 쓰므로 실행하지 않는다
+  tree-sitter-bash: false
