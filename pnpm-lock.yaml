@@ -196,6 +196,9 @@ importers:
       '@desktop-agent/policy-core':
         specifier: workspace:*
         version: link:../../packages/policy-core
+      '@desktop-agent/privacy-filter':
+        specifier: workspace:*
+        version: link:../../packages/privacy-filter
     devDependencies:
       '@types/node':
         specifier: ^24.19.2
@@ -211,6 +214,12 @@ importers:
       '@desktop-agent/policy-core':
         specifier: workspace:*
         version: link:../policy-core
+      '@desktop-agent/privacy-filter':
+        specifier: workspace:*
+        version: link:../privacy-filter
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: ^24.19.2
@@ -243,7 +252,15 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
-  packages/privacy-filter: {}
+  packages/privacy-filter:
+    dependencies:
+      '@desktop-agent/policy-core':
+        specifier: workspace:*
+        version: link:../policy-core
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
 
 packages:
 

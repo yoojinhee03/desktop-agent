@@ -46,6 +46,11 @@ function parseAnswer(raw: string, sessionAllowed: boolean): ApprovalAnswer {
   return "rejected"; // 알아들을 수 없는 답은 거절
 }
 
+function questionText(sessionAllowed: boolean): string {
+  const choices = sessionAllowed ? "y: 실행 / s: 이번 세션에서 같은 종류 허용 / n: 거절" : "y/n";
+  return `  실행할까요? (${choices}) `;
+}
+
 /** 터미널 승인. y는 이번만 승인, s는 세션 허용(가능할 때만), 그 밖의 답은 모두 거절이다. */
 export function createTerminalApprover(
   input: NodeJS.ReadableStream = process.stdin,
@@ -58,10 +63,7 @@ export function createTerminalApprover(
       try {
         output.write(`${promptLines(call, decision).join("\n")}\n`);
         const sessionAllowed = canAllowForSession(decision);
-        const choices = sessionAllowed
-          ? "y: 실행 / s: 이번 세션에서 같은 종류 허용 / n: 거절"
-          : "y/n";
-        return parseAnswer(await rl.question(`  실행할까요? (${choices}) `), sessionAllowed);
+        return parseAnswer(await rl.question(questionText(sessionAllowed)), sessionAllowed);
       } finally {
         rl.close();
       }

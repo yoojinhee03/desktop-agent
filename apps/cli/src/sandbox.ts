@@ -1,7 +1,7 @@
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type ApprovalAnswer, describeCall } from "@desktop-agent/adapter-agent-sdk";
+import { type ApprovalAnswer, agentToolName, describeCall } from "@desktop-agent/adapter-agent-sdk";
 import type { ToolCall } from "@desktop-agent/policy-core";
 
 const PDF_STUB = "%PDF-1.4\n%sandbox fixture\n%%EOF\n";
@@ -9,6 +9,8 @@ const FIXTURES: Record<string, string> = {
   "Downloads/견적서_2026.pdf": PDF_STUB,
   "Downloads/report.pdf": PDF_STUB,
   "Downloads/notes.txt": "샘플 텍스트\n",
+  // 마스킹 확인용 가짜 설정 파일 (실제 비밀번호 아님)
+  "Downloads/config.txt": "DB_HOST=localhost\nDB_PASSWORD=sandbox-Pa55word!\n",
   "Downloads/archive/invoice-old.pdf": PDF_STUB,
 };
 
@@ -56,12 +58,21 @@ function bashIsSafe(command: string, sandbox: Sandbox): boolean {
  */
 export const SANDBOX_JUDGE_ID = "sandbox-readonly";
 
+const SHELL_TOOLS = ["Bash", agentToolName("shell")];
+const READ_TOOLS = [
+  "Read",
+  "Glob",
+  "Grep",
+  agentToolName("read_file"),
+  agentToolName("list_files"),
+];
+
 export function sandboxReadOnlyJudge(sandbox: Sandbox) {
   return (call: ToolCall): ApprovalAnswer => {
-    if (call.toolName === "Bash") {
+    if (SHELL_TOOLS.includes(call.toolName)) {
       return bashIsSafe(describeCall(call), sandbox) ? "approved" : "rejected";
     }
-    if (!["Read", "Glob", "Grep"].includes(call.toolName)) return "rejected";
+    if (!READ_TOOLS.includes(call.toolName)) return "rejected";
     const path = call.input.file_path ?? call.input.path;
     if (path === undefined) return "approved"; // cwd(샌드박스) 기준 검색
     return typeof path === "string" && insideSandbox(path, sandbox) ? "approved" : "rejected";

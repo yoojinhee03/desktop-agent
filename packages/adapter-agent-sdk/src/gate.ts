@@ -12,6 +12,7 @@ import type {
   ToolCall,
 } from "@desktop-agent/policy-core";
 import type { ApprovalAnswer, Approver } from "./approver.ts";
+import type { ApprovalLedger } from "./mcp/ledger.ts";
 import { type BaseContext, SessionStore } from "./session-store.ts";
 
 export type Outcome =
@@ -40,6 +41,8 @@ export interface PolicyGateOptions {
   context: BaseContext;
   approver: Approver;
   initialSession?: SessionState;
+  /** 자체 MCP 도구용 승인 장부. 허용한 입력을 여기 올려야 도구가 실행된다 */
+  ledger?: ApprovalLedger;
   onEvent?: (event: GateEvent) => void | Promise<void>;
 }
 
@@ -98,9 +101,28 @@ function toHookOutput(event: GateEvent): SyncHookJSONOutput {
   };
 }
 
-function applyToSession(store: SessionStore, decision: PolicyDecision, verdict: Verdict): void {
-  if (verdict.outcome === "approved_for_session") store.allowForSession(decision);
-  if (verdict.executedInput !== null) store.applyExecuted(decision);
+/** 실행이 허용됐으면 세션 상태와 승인 장부에 반영한다 */
+function applyVerdict(options: PolicyGateOptions, store: SessionStore, event: GateEvent): void {
+  const { decision, executedInput } = event;
+  if (!decision) return;
+  if (event.outcome === "approved_for_session") store.allowForSession(decision);
+  if (executedInput === null) return;
+  store.applyExecuted(decision);
+  const { toolUseId, call } = event;
+  options.ledger?.grant({ toolUseId, toolName: call.toolName, input: executedInput, decision });
+}
+
+function errorEvent(toolUseId: string, call: ToolCall, err: unknown): GateEvent {
+  const error = err instanceof Error ? err.message : String(err);
+  return {
+    toolUseId,
+    call,
+    decision: null,
+    outcome: "error",
+    decidedBy: POLICY,
+    executedInput: null,
+    error,
+  };
 }
 
 async function judge(
@@ -112,19 +134,11 @@ async function judge(
   try {
     const decision = options.decide(call, store.context());
     const verdict = await resolve(call, decision, options.approver);
-    applyToSession(store, decision, verdict);
-    return { toolUseId, call, decision, ...verdict };
+    const event: GateEvent = { toolUseId, call, decision, ...verdict };
+    applyVerdict(options, store, event);
+    return event;
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    return {
-      toolUseId,
-      call,
-      decision: null,
-      outcome: "error",
-      decidedBy: POLICY,
-      executedInput: null,
-      error,
-    };
+    return errorEvent(toolUseId, call, err);
   }
 }
 
@@ -138,9 +152,8 @@ function asRecord(value: unknown): Record<string, unknown> {
  * 훅을 우회해 도달한 호출을 거부하는 안전망으로만 둔다.
  * 호출 쪽은 정책 엔진의 ready()를 먼저 끝내야 한다. 안 그러면 decide()가 던지고 모든 호출이 거부된다.
  */
-export function createPolicyGate(options: PolicyGateOptions): PolicyGate {
-  const store = new SessionStore(options.context, options.initialSession);
-  const preToolUse: HookCallback = async (input, toolUseId) => {
+function preToolUseHook(options: PolicyGateOptions, store: SessionStore): HookCallback {
+  return async (input, toolUseId) => {
     if (input.hook_event_name !== "PreToolUse") return {};
     const call: ToolCall = { toolName: input.tool_name, input: asRecord(input.tool_input) };
     const id = toolUseId ?? input.tool_use_id;
@@ -150,10 +163,16 @@ export function createPolicyGate(options: PolicyGateOptions): PolicyGate {
       return toHookOutput(event);
     });
   };
-  const canUseTool: CanUseTool = async (toolName) => ({
-    behavior: "deny",
-    message: `정책 엔진 훅을 거치지 않은 권한 요청이라 거부함: ${toolName}`,
-  });
+}
+
+const canUseTool: CanUseTool = async (toolName) => ({
+  behavior: "deny",
+  message: `정책 엔진 훅을 거치지 않은 권한 요청이라 거부함: ${toolName}`,
+});
+
+export function createPolicyGate(options: PolicyGateOptions): PolicyGate {
+  const store = new SessionStore(options.context, options.initialSession);
+  const preToolUse = preToolUseHook(options, store);
   return {
     hooks: { PreToolUse: [{ hooks: [preToolUse], onFailure: "block" }] },
     canUseTool,
