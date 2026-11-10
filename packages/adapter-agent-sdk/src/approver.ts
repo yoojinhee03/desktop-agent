@@ -39,6 +39,8 @@ function promptLines(call: ToolCall, decision: PolicyDecision): string[] {
     `\n[승인 요청] 등급 ${decision.grade} · ${decision.ruleIds.join(", ")}`,
     `  도구: ${call.toolName}`,
     `  내용: ${describeCall(call)}`,
+    // 설계: 승인 창에는 "실제 실행될 명령"을 보여준다 (rm → 휴지통 이동 등 치환된 경우)
+    ...(decision.rewrite ? [`  실제 실행: ${decision.rewrite}`] : []),
     `  사유: ${decision.reasons.join(" / ")}`,
   ];
   for (const label of describeFlags(decision.flags)) lines.push(`  표시: ${label}`);

@@ -94,3 +94,26 @@ describe("실제 정책 엔진 연결", () => {
     expect(events[1]?.decision?.grade).toBe("block");
   });
 });
+
+describe("승인이 필요한 삭제도 휴지통으로 (실제 정책 엔진)", () => {
+  it("대량 삭제(60개)는 승인을 묻고, 승인하면 휴지통 이동을 실행한다", async () => {
+    mkdirSync(join(home, "Downloads", "bulk"));
+    for (let i = 0; i < 60; i++) writeFileSync(join(home, "Downloads", "bulk", `f${i}.tmp`), "x");
+    const out = await callHook(makeGate("approved"), bash("rm ~/Downloads/bulk/*.tmp"));
+    expect(events[0]?.decision).toMatchObject({ grade: 2, action: "ask" });
+    expect(events[0]?.decision?.ruleIds).toContain("cmd.rm.bulk");
+    expect(asked).toBe(1);
+    expect(String(out.updatedInput?.command)).toContain("trash");
+    expect(String(out.updatedInput?.command)).not.toMatch(/^rm\b/);
+  });
+
+  it("rm과 다른 2등급 명령을 섞어도 승인 후 rm 부분은 휴지통 이동이다", async () => {
+    const out = await callHook(
+      makeGate("approved"),
+      bash("rm ~/Downloads/a.pdf && brew install jq"),
+    );
+    expect(events[0]?.decision?.action).toBe("ask");
+    expect(String(out.updatedInput?.command)).toContain("trash");
+    expect(String(out.updatedInput?.command)).not.toMatch(/(^|&&\s*)rm\b/);
+  });
+});

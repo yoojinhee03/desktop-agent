@@ -57,16 +57,24 @@ type Verdict = Pick<GateEvent, "outcome" | "executedInput" | "decidedBy">;
 
 const POLICY = "policy";
 
+/**
+ * 실제로 실행할 입력. 판정에 rewrite가 있으면 action이 무엇이든(allow·rewrite·ask) 치환된 명령을 실행한다.
+ * 예: 대량 삭제는 2등급 ask이면서 rewrite(휴지통 이동)를 함께 준다. 승인 후 원래 rm을 실행하면 영구 삭제가 된다.
+ */
+export function inputToExecute(call: ToolCall, d: PolicyDecision): Record<string, unknown> {
+  return d.rewrite === undefined ? call.input : { ...call.input, command: d.rewrite };
+}
+
 async function ask(call: ToolCall, decision: PolicyDecision, approver: Approver): Promise<Verdict> {
   const answer: ApprovalAnswer = await approver.ask(call, decision);
-  const executedInput = answer === "rejected" ? null : call.input;
+  const executedInput = answer === "rejected" ? null : inputToExecute(call, decision);
   return { outcome: answer, executedInput, decidedBy: approver.id };
 }
 
 async function resolve(call: ToolCall, d: PolicyDecision, approver: Approver): Promise<Verdict> {
   switch (d.action) {
     case "allow":
-      return { outcome: "auto_allowed", executedInput: call.input, decidedBy: POLICY };
+      return { outcome: "auto_allowed", executedInput: inputToExecute(call, d), decidedBy: POLICY };
     case "deny":
       return { outcome: "denied", executedInput: null, decidedBy: POLICY };
     case "rewrite":
@@ -74,11 +82,7 @@ async function resolve(call: ToolCall, d: PolicyDecision, approver: Approver): P
       if (d.rewrite === undefined) {
         return { outcome: "denied", executedInput: null, decidedBy: POLICY };
       }
-      return {
-        outcome: "rewritten",
-        executedInput: { ...call.input, command: d.rewrite },
-        decidedBy: POLICY,
-      };
+      return { outcome: "rewritten", executedInput: inputToExecute(call, d), decidedBy: POLICY };
     case "ask":
       return ask(call, d, approver);
   }
@@ -94,7 +98,8 @@ function toHookOutput(event: GateEvent): SyncHookJSONOutput {
       permissionDecisionReason: allowed
         ? reason
         : `정책 엔진이 거부함 (${event.outcome}): ${reason}`,
-      ...(event.outcome === "rewritten" && event.executedInput
+      // 원래 입력과 다른 것을 실행해야 하면(치환) 반드시 updatedInput으로 넘긴다
+      ...(event.executedInput && event.executedInput !== event.call.input
         ? { updatedInput: event.executedInput }
         : {}),
     },
