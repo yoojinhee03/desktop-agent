@@ -1,9 +1,12 @@
+import { PassThrough } from "node:stream";
 import type { PolicyDecision } from "@desktop-agent/policy-core";
 import { describe, expect, it } from "vitest";
 import {
   type ApprovalAnswer,
   createPolicyGate,
   createScriptedApprover,
+  createTerminalApprover,
+  describeFlags,
   type GateEvent,
 } from "../src/index.ts";
 import { baseContext, callHook, preToolUse } from "./helpers.ts";
@@ -151,5 +154,34 @@ describe("세션 상태", () => {
       ["t1", "t2", "t3"].map((id) => callHook(gate, preToolUse("Bash", { command: id }, id))),
     );
     expect(maxActive).toBe(1);
+  });
+});
+
+describe("승인 창 표시 문구", () => {
+  it("외부 내용 표시는 설계 문구대로 보여준다", () => {
+    expect(describeFlags(["after_external_content"])[0]).toContain("외부 내용 읽은 후");
+  });
+
+  it("터미널 승인 창에 표시와 세션 허용 선택지가 나온다", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let shown = "";
+    output.on("data", (c: Buffer) => {
+      shown += c.toString();
+    });
+    const approver = createTerminalApprover(input, output);
+    const decision: PolicyDecision = {
+      ...base,
+      flags: ["after_external_content"],
+      allowKeys: ["cmd.brew.install"],
+    };
+    const answer = approver.ask(
+      { toolName: "Bash", input: { command: "brew install jq" } },
+      decision,
+    );
+    input.write("s\n");
+    expect(await answer).toBe("approved_for_session");
+    expect(shown).toContain("외부 내용 읽은 후");
+    expect(shown).toContain("s: 이번 세션에서 같은 종류 허용");
   });
 });
