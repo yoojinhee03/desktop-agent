@@ -32,6 +32,8 @@ export interface RuntimeOptions {
   dataDir: string;
   approver: Approver;
   log: (line: string) => void;
+  /** 판정 한 건마다 (시나리오 실행기가 기대 동작과 비교할 때) */
+  onGate?: (event: GateEvent) => void;
 }
 
 function gateRecorder(o: RuntimeOptions, rt: Pick<Runtime, "audit" | "coverage">, id: string) {
@@ -39,6 +41,7 @@ function gateRecorder(o: RuntimeOptions, rt: Pick<Runtime, "audit" | "coverage">
     rt.audit.append(toDecisionEntry(id, e));
     rt.coverage.recordGate(e);
     o.log(formatGateEvent(e));
+    o.onGate?.(e);
   };
 }
 

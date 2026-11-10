@@ -2,5 +2,20 @@
   "name": "@desktop-agent/eval",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "scenarios": "tsx src/main.ts",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@desktop-agent/adapter-agent-sdk": "workspace:*",
+    "@desktop-agent/cli": "workspace:*",
+    "@desktop-agent/policy-core": "workspace:*",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2"
+  }
 }

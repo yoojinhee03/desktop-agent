@@ -16,5 +16,9 @@
   },
   "devDependencies": {
     "@types/node": "^24.19.2"
+  },
+  "exports": {
+    "./agent": "./src/agent.ts",
+    "./audit": "./src/audit.ts"
   }
 }

@@ -204,7 +204,27 @@ importers:
         specifier: ^24.19.2
         version: 24.19.2
 
-  eval: {}
+  eval:
+    dependencies:
+      '@desktop-agent/adapter-agent-sdk':
+        specifier: workspace:*
+        version: link:../packages/adapter-agent-sdk
+      '@desktop-agent/cli':
+        specifier: workspace:*
+        version: link:../apps/cli
+      '@desktop-agent/policy-core':
+        specifier: workspace:*
+        version: link:../packages/policy-core
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
 
   packages/adapter-agent-sdk:
     dependencies:

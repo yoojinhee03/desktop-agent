@@ -1,0 +1,13 @@
+id: find-reveal
+title: 파일 찾기 → Finder에서 보여주기
+# 설계: 전체 아키텍처 > 대표 시나리오 1 (승인 불필요)
+request: 다운로드 폴더에서 desktop-agent-scenario 견적서 PDF를 찾아서 Finder에서 보여줘
+fixtures:
+  - path: ~/Downloads/desktop-agent-scenario-견적서.pdf
+    content: "%PDF-1.4\n"
+  - path: ~/Downloads/desktop-agent-scenario-메모.txt
+    content: "견적서 아님\n"
+expect:
+  max_approvals: 0
+  executed_include:
+    - 'open\s+-R\s.*desktop-agent-scenario-견적서\.pdf'
