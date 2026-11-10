@@ -30,7 +30,10 @@ const decision: DecisionEntry = {
   grade: 2,
   action: "ask",
   ruleIds: ["stub.unclassified"],
+  reasons: ["미분류"],
+  flags: [],
   outcome: "approved",
+  decidedBy: "user:terminal",
   executedInput: { command: 'find . -name "*.pdf"' },
 };
 

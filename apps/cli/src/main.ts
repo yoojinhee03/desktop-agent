@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 import {
   type Options,
@@ -14,11 +15,16 @@ import {
   type GateEvent,
   type PolicyGate,
 } from "@desktop-agent/adapter-agent-sdk";
-import { decide } from "@desktop-agent/policy-core";
-import { dataDir, openVerifiedLog, toDecisionEntry } from "./audit.ts";
+import { decide, nodeFs, ready } from "@desktop-agent/policy-core";
+import { agentPathGlobs, dataDir, openVerifiedLog, toDecisionEntry } from "./audit.ts";
 import { CoverageTracker } from "./coverage.ts";
 import { formatGateEvent } from "./log.ts";
-import { prepareSandbox, sandboxPromptNote, sandboxReadOnlyJudge } from "./sandbox.ts";
+import {
+  prepareSandbox,
+  SANDBOX_JUDGE_ID,
+  sandboxPromptNote,
+  sandboxReadOnlyJudge,
+} from "./sandbox.ts";
 
 const TOOLS = ["Bash", "Read", "Glob", "Grep"];
 
@@ -40,7 +46,7 @@ async function setup(): Promise<Setup> {
   if (!values.sandbox) return { cwd: process.cwd(), approver: createTerminalApprover() };
   const sandbox = await prepareSandbox();
   const approver = values["scripted-approver"]
-    ? createScriptedApprover(sandboxReadOnlyJudge(sandbox))
+    ? createScriptedApprover(SANDBOX_JUDGE_ID, sandboxReadOnlyJudge(sandbox))
     : createTerminalApprover();
   return { cwd: sandbox.root, approver, append: sandboxPromptNote(sandbox) };
 }
@@ -85,8 +91,10 @@ function printCoverage(coverage: CoverageTracker): boolean {
 const logLine = (line: string) => process.stderr.write(`${line}\n`);
 
 async function run(prompt: string): Promise<number> {
+  await ready(); // 규칙·파서 로드. 실패하면 에이전트를 시작하지 않는다
   const { cwd, approver, append } = await setup();
-  const audit = openVerifiedLog(dataDir(values.sandbox), logLine);
+  const dir = dataDir(values.sandbox);
+  const audit = openVerifiedLog(dir, logLine);
   const requestId = randomUUID();
   audit.append({ kind: "request", requestId, prompt });
   const coverage = new CoverageTracker();
@@ -95,7 +103,8 @@ async function run(prompt: string): Promise<number> {
     coverage.recordGate(e);
     logLine(formatGateEvent(e));
   };
-  const gate = createPolicyGate({ decide, approver, onEvent });
+  const context = { home: homedir(), cwd, fs: nodeFs, agentPaths: agentPathGlobs(dir) };
+  const gate = createPolicyGate({ decide, context, approver, onEvent });
   logLine(`[agent] cwd=${cwd}`);
   let ok = false;
   try {
@@ -105,6 +114,7 @@ async function run(prompt: string): Promise<number> {
       if (message.type === "result") ok = reportResult(message);
     }
   } finally {
+    gate.endUserRequest();
     audit.close();
   }
   return printCoverage(coverage) && ok ? 0 : 1;
