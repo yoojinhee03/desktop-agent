@@ -11,15 +11,17 @@ import type {
   SessionState,
   ToolCall,
 } from "@desktop-agent/policy-core";
-import type { ApprovalAnswer, Approver } from "./approver.ts";
+import type { ApprovalReply, Approver } from "./approver.ts";
 import type { ApprovalLedger } from "./mcp/ledger.ts";
 import { type BaseContext, SessionStore } from "./session-store.ts";
+import { buildApprovalView } from "./view/approval-view.ts";
 
 export type Outcome =
   | "auto_allowed"
   | "approved"
   | "approved_for_session"
   | "rejected"
+  | "revision_requested"
   | "denied"
   | "rewritten"
   | "error";
@@ -33,6 +35,8 @@ export interface GateEvent {
   /** 실행을 결정한 주체: policy(자동 허용·거부·치환) 또는 승인자 id */
   decidedBy: string;
   executedInput: Record<string, unknown> | null;
+  /** 수정 요청일 때 사용자가 남긴 말. 에이전트에게 그대로 전달된다 */
+  feedback?: string;
   error?: string;
 }
 
@@ -53,7 +57,7 @@ export interface PolicyGate {
   endUserRequest(): void;
 }
 
-type Verdict = Pick<GateEvent, "outcome" | "executedInput" | "decidedBy">;
+type Verdict = Pick<GateEvent, "outcome" | "executedInput" | "decidedBy" | "feedback">;
 
 const POLICY = "policy";
 
@@ -65,13 +69,20 @@ export function inputToExecute(call: ToolCall, d: PolicyDecision): Record<string
   return d.rewrite === undefined ? call.input : { ...call.input, command: d.rewrite };
 }
 
-async function ask(call: ToolCall, decision: PolicyDecision, approver: Approver): Promise<Verdict> {
-  const answer: ApprovalAnswer = await approver.ask(call, decision);
-  const executedInput = answer === "rejected" ? null : inputToExecute(call, decision);
-  return { outcome: answer, executedInput, decidedBy: approver.id };
+function toVerdict(reply: ApprovalReply, call: ToolCall, d: PolicyDecision, by: string): Verdict {
+  if (typeof reply !== "string") {
+    return { outcome: reply.answer, executedInput: null, decidedBy: by, feedback: reply.feedback };
+  }
+  const executedInput = reply === "rejected" ? null : inputToExecute(call, d);
+  return { outcome: reply, executedInput, decidedBy: by };
 }
 
-async function resolve(call: ToolCall, d: PolicyDecision, approver: Approver): Promise<Verdict> {
+async function ask(call: ToolCall, d: PolicyDecision, o: PolicyGateOptions): Promise<Verdict> {
+  const view = await buildApprovalView(call, d, o.context);
+  return toVerdict(await o.approver.ask(call, d, view), call, d, o.approver.id);
+}
+
+async function resolve(call: ToolCall, d: PolicyDecision, o: PolicyGateOptions): Promise<Verdict> {
   switch (d.action) {
     case "allow":
       return { outcome: "auto_allowed", executedInput: inputToExecute(call, d), decidedBy: POLICY };
@@ -84,20 +95,27 @@ async function resolve(call: ToolCall, d: PolicyDecision, approver: Approver): P
       }
       return { outcome: "rewritten", executedInput: inputToExecute(call, d), decidedBy: POLICY };
     case "ask":
-      return ask(call, d, approver);
+      return ask(call, d, o);
   }
+}
+
+/** 에이전트가 읽는 사유. 수정 요청이면 사용자의 말을 전해 다른 방법을 찾게 한다 */
+function hookReason(event: GateEvent): string {
+  const reason = event.error ?? event.decision?.reasons.join(" / ") ?? "정책 엔진 판정 없음";
+  if (event.executedInput !== null) return reason;
+  if (event.outcome === "revision_requested") {
+    return `사용자가 이 호출을 실행하지 않고 수정을 요청함: "${event.feedback ?? ""}". 이 요청을 반영해 방법을 바꿔 다시 시도하세요.`;
+  }
+  return `정책 엔진이 거부함 (${event.outcome}): ${reason}`;
 }
 
 function toHookOutput(event: GateEvent): SyncHookJSONOutput {
   const allowed = event.executedInput !== null;
-  const reason = event.error ?? event.decision?.reasons.join(" / ") ?? "정책 엔진 판정 없음";
   return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: allowed ? "allow" : "deny",
-      permissionDecisionReason: allowed
-        ? reason
-        : `정책 엔진이 거부함 (${event.outcome}): ${reason}`,
+      permissionDecisionReason: hookReason(event),
       // 원래 입력과 다른 것을 실행해야 하면(치환) 반드시 updatedInput으로 넘긴다
       ...(event.executedInput && event.executedInput !== event.call.input
         ? { updatedInput: event.executedInput }
@@ -138,7 +156,7 @@ async function judge(
 ): Promise<GateEvent> {
   try {
     const decision = options.decide(call, store.context());
-    const verdict = await resolve(call, decision, options.approver);
+    const verdict = await resolve(call, decision, options);
     const event: GateEvent = { toolUseId, call, decision, ...verdict };
     applyVerdict(options, store, event);
     return event;

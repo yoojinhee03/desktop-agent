@@ -8,7 +8,7 @@ import {
   type FilterEntry,
   openAuditLog,
 } from "@desktop-agent/audit-log";
-import { maskDeep } from "@desktop-agent/privacy-filter";
+import { maskDeep, maskSecrets } from "@desktop-agent/privacy-filter";
 
 /**
  * 감사 로그 위치: 에이전트 작업 폴더(cwd) 밖의 앱 전용 폴더.
@@ -69,8 +69,10 @@ export function toDecisionEntry(requestId: string, event: GateEvent): DecisionEn
     ruleIds: d?.ruleIds ?? [],
     reasons: d?.reasons ?? [],
     flags: d?.flags ?? [],
-    ...(d?.preview ? { preview: d.preview } : {}),
+    // 정책 엔진이 preview.diff에 파일 내용을 담을 수 있어 같이 가린다
+    ...(d?.preview ? { preview: maskDeep(d.preview) } : {}),
     outcome: event.outcome,
+    ...(event.feedback ? { feedback: maskSecrets(event.feedback).text } : {}),
     decidedBy: event.decidedBy,
     executedInput: event.executedInput && maskDeep(event.executedInput),
     ...(event.error ? { error: event.error } : {}),

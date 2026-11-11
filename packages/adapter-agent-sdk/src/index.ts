@@ -4,3 +4,5 @@ export * from "./mcp/ledger.ts";
 export * from "./mcp/server.ts";
 export { shellEnv } from "./mcp/shell.ts";
 export * from "./session-store.ts";
+export * from "./view/approval-view.ts";
+export { unifiedDiff } from "./view/line-diff.ts";
