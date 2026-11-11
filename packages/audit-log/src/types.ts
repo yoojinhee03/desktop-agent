@@ -24,8 +24,10 @@ export interface DecisionEntry {
   flags: PolicyFlag[];
   /** 영향 범위(대상 경로·개수·크기). 휴지통 치환이면 원래 경로가 여기와 input에 남아 실행 취소에 쓴다 */
   preview?: ChangePreview;
-  // auto_allowed | approved | approved_for_session | rejected | denied | rewritten | error
+  // auto_allowed | approved | approved_for_session | rejected | revision_requested | denied | rewritten | error
   outcome: string;
+  /** 수정 요청일 때 사용자가 남긴 말 (시크릿은 가린 뒤 저장) */
+  feedback?: string;
   /** 실행을 결정한 주체: policy 또는 승인자 id (user:terminal, script:…) */
   decidedBy: string;
   /** 실제 실행된 입력. rewrite면 치환된 명령, 거부면 null */
